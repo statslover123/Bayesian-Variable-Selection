@@ -1,0 +1,642 @@
+---
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+Example Code for Protein Predictions is shown in the below two chunks. For prediction of other traits, a different trait could be taken from the myY data frame and then the code needs to be changed to have a new response variable. For all code below, the dot after the tilde (~.) is an easy way to specify that all columns in the data frame besides the response variable should be treated as individual predictors. It is not practical to type out the names of all 3,000 genetic markers are predictors like Protein ~ Marker one + marker two + marker three etc. The way the priors are specified with open parentheses means that they get applied to all 'fixed effects' in the model, so in this case all genetic markers have the prior applied. Running a full round of five fold validation and then a single model with all the data takes over a day on universty computing resources, so code is not evaluated in this document only presented.
+
+
+The below code is for Lasso prediction. One file contains trait information, the trait of interest is pulled out and combined with another file that contains all the genetic information. The taxa column that contains identifier information is them removed. Rstan is normally used to run code written with BRMS, however cmdstanr was used instead as it is slightly faster. Files can be saved that contain coefficient values and 95% credible interval around those coeffcients. Results for predictions and fitted values for the non cross validated models can also be saved. 
+
+```{r eval=FALSE}
+
+set.seed(7)
+library('dplyr', lib.loc='/data/lab/pumphrey/RPack/')
+library('brms', lib.loc='/data/lab/pumphrey/RPack/')
+library('sjPlot',lib.loc='/data/lab/pumphrey/RPack/')
+library('cmdstanr', lib.loc='/data/lab/pumphrey/RPack/')
+setwd("/data/lab/pumphrey/RFiles")
+MyY<-read.delim('SpillmanHardandSoftLaergeBlock.txt')
+MyY <- na.omit(MyY)
+MyG<-read.delim('reduced3.txt')
+yield <-MyY[c("Taxa","Protein")]
+names(yield)[1] <- 'taxa'
+
+table1.df <- dplyr::inner_join(yield, MyG, by= 'taxa')
+table2.dfw = subset(table1.df, select = -c(taxa) )
+options(future.globals.maxSize= +Inf)
+for_horseshoe <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10), prior = prior(lasso(df=1,scale=1)))
+for_horseshoe2 <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10), prior = prior(lasso(df=3,scale=1)))
+for_horseshoe3 <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10), prior = prior(lasso(df=5,scale=1)))
+for_horseshoe4 <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10), prior = prior(lasso(df=10,scale=1)))
+
+kf<-kfold(for_horseshoe, K=5, save_fits=TRUE, chains=2)
+kf2<-kfold(for_horseshoe2, K=5, save_fits=TRUE, chains=2)
+kf3<-kfold(for_horseshoe3, K=5, save_fits=TRUE, chains=2)
+kf4<-kfold(for_horseshoe4, K=5, save_fits=TRUE, chains=2)
+rmse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  sqrt(mean((yrep_mean - y)^2))
+}
+
+mea <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean(abs(yrep_mean - y)))
+}
+
+mse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean((yrep_mean - y)^2))
+}
+
+kfp <- kfold_predict(kf)
+kfp2 <- kfold_predict(kf2)
+kfp3 <- kfold_predict(kf3)
+kfp4 <- kfold_predict(kf4)
+print('RMSE then MEA then MSE for df1')
+rmse(y = kfp$y, yrep = kfp$yrep)
+mea(y = kfp$y, yrep = kfp$yrep)
+mse(y = kfp$y, yrep = kfp$yrep)
+yrep_mean1 <- colMeans( kfp$yrep)
+yrep_mean2 <- mean((yrep_mean1 - kfp$y)^2)
+yrep_mean3 <- mean((yrep_mean1 - kfp$yrep)^2)
+1-(yrep_mean2/yrep_mean3)
+
+
+
+print('RMSE then MEA then MSE for df3')
+rmse(y = kfp2$y, yrep = kfp2$yrep)
+mea(y = kfp2$y, yrep = kfp2$yrep)
+mse(y = kfp2$y, yrep = kfp2$yrep)
+yrep_mean11 <- colMeans( kfp2$yrep)
+yrep_mean22 <- mean((yrep_mean11 - kfp2$y)^2)
+yrep_mean33 <- mean((yrep_mean11 - kfp2$yrep)^2)
+1-(yrep_mean22/yrep_mean33)
+
+print('RMSE then MEA then MSE for df5')
+rmse(y = kfp3$y, yrep = kfp3$yrep)
+mea(y = kfp3$y, yrep = kfp3$yrep)
+mse(y = kfp3$y, yrep = kfp3$yrep)
+yrep_mean111 <- colMeans( kfp3$yrep)
+yrep_mean222 <- mean((yrep_mean111 - kfp3$y)^2)
+yrep_mean333<- mean((yrep_mean111 - kfp3$yrep)^2)
+1-(yrep_mean222/yrep_mean333)
+
+
+print('RMSE then MEA then MSE for df10')
+rmse(y = kfp4$y, yrep = kfp4$yrep)
+mea(y = kfp4$y, yrep = kfp4$yrep)
+mse(y = kfp4$y, yrep = kfp4$yrep)
+yrep_mean1111 <- colMeans( kfp4$yrep)
+yrep_mean2222 <- mean((yrep_mean1111 - kfp4$y)^2)
+yrep_mean3333<- mean((yrep_mean1111 - kfp4$yrep)^2)
+1-(yrep_mean2222/yrep_mean3333)
+
+coefs<-fixef(for_horseshoe)
+coefs2<-fixef(for_horseshoe2)
+coefs3<-fixef(for_horseshoe3)
+coefs4<-fixef(for_horseshoe4)
+
+write.table(coefs, file = "/data/lab/pumphrey/RScript/STATproj/lassodf1protein.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs2, file = "/data/lab/pumphrey/RScript/STATproj/lassodf3protein.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs3, file = "/data/lab/pumphrey/RScript/STATproj/lassodf5protein.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs4, file = "/data/lab/pumphrey/RScript/STATproj/lassodf10protein.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+print('LM fitted forlasso 1')
+ppe12 <- fitted(for_horseshoe)
+ppe12<-as.data.frame(ppe12)
+lm(ppe12$Estimate~table2.dfw$Protein)
+summary(lm(ppe12$Estimate~table2.dfw$Protein))
+       
+dat <- as.data.frame(cbind(Y = standata(for_horseshoe)$Y, ppe12))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/proteinlassofitteddf1.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+print('LM fitted forlasso 3')
+ppe <- fitted(for_horseshoe2)
+ppe<-as.data.frame(ppe)
+lm(ppe$Estimate~table2.dfw$Protein)
+summary(lm(ppe$Estimate~table2.dfw$Protein))
+
+dat2 <- as.data.frame(cbind(Y = standata(for_horseshoe2)$Y, ppe))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/proteinlassofitteddf3.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+
+print('LM fitted for forlasso 5')
+ppe2 <- fitted(for_horseshoe3)
+ppe2<-as.data.frame(ppe2)
+lm(ppe2$Estimate~table2.dfw$Protein)
+summary(lm(ppe2$Estimate~table2.dfw$Protein))
+
+print('LM fitted for forlasso 10')
+ppe3 <- fitted(for_horseshoe4)
+ppe3<-as.data.frame(ppe3)
+lm(ppe3$Estimate~table2.dfw$Protein)
+summary(lm(ppe3$Estimate~table2.dfw$Protein))
+
+
+```
+
+This code for protein is used for the horseshoe prior.
+```{r eval=FALSE}
+print('Protein horshoe par ratio test')
+set.seed(7)
+library('dplyr', lib.loc='/data/lab/pumphrey/RPack/')
+library('brms', lib.loc='/data/lab/pumphrey/RPack/')
+library('sjPlot',lib.loc='/data/lab/pumphrey/RPack/')
+library('cmdstanr', lib.loc='/data/lab/pumphrey/RPack/')
+setwd("/data/lab/pumphrey/RFiles")
+MyY<-read.delim('SpillmanHardandSoftLaergeBlock.txt')
+MyY <- na.omit(MyY)
+MyG<-read.delim('reduced3.txt')
+yield <-MyY[c("Taxa","Protein")]
+names(yield)[1] <- 'taxa'
+
+table1.df <- dplyr::inner_join(yield, MyG, by= 'taxa')
+table2.dfw = subset(table1.df, select = -c(taxa) )
+options(future.globals.maxSize= +Inf)
+for_horseshoe <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10),  prior = prior(horseshoe()))
+for_horseshoe2 <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10),  prior= prior(horseshoe(1,par_ratio=.3)))
+for_horseshoe3 <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10),  prior= prior(horseshoe(1,par_ratio=.6)))
+for_horseshoe4 <- brm(Protein ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10),  prior= prior(horseshoe(1,par_ratio=.9)))
+
+kf<-kfold(for_horseshoe, K=5, save_fits=TRUE, chains=2)
+kf2<-kfold(for_horseshoe2, K=5, save_fits=TRUE, chains=2)
+kf3<-kfold(for_horseshoe3, K=5, save_fits=TRUE, chains=2)
+kf4<-kfold(for_horseshoe4, K=5, save_fits=TRUE, chains=2)
+rmse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  sqrt(mean((yrep_mean - y)^2))
+}
+
+mea <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean(abs(yrep_mean - y)))
+}
+
+mse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean((yrep_mean - y)^2))
+}
+
+kfp <- kfold_predict(kf)
+kfp2 <- kfold_predict(kf2)
+kfp3 <- kfold_predict(kf3)
+kfp4 <- kfold_predict(kf4)
+print('RMSE then MEA then MSE for flat horse')
+rmse(y = kfp$y, yrep = kfp$yrep)
+mea(y = kfp$y, yrep = kfp$yrep)
+mse(y = kfp$y, yrep = kfp$yrep)
+yrep_mean1 <- colMeans( kfp$yrep)
+yrep_mean2 <- mean((yrep_mean1 - kfp$y)^2)
+yrep_mean3 <- mean((yrep_mean1 - kfp$yrep)^2)
+1-(yrep_mean2/yrep_mean3)
+
+
+
+print('RMSE then MEA then MSE for .3 horse')
+rmse(y = kfp2$y, yrep = kfp2$yrep)
+mea(y = kfp2$y, yrep = kfp2$yrep)
+mse(y = kfp2$y, yrep = kfp2$yrep)
+yrep_mean11 <- colMeans( kfp2$yrep)
+yrep_mean22 <- mean((yrep_mean11 - kfp2$y)^2)
+yrep_mean33 <- mean((yrep_mean11 - kfp2$yrep)^2)
+1-(yrep_mean22/yrep_mean33)
+
+print('RMSE then MEA then MSE for .6 horse')
+rmse(y = kfp3$y, yrep = kfp3$yrep)
+mea(y = kfp3$y, yrep = kfp3$yrep)
+mse(y = kfp3$y, yrep = kfp3$yrep)
+yrep_mean111 <- colMeans( kfp3$yrep)
+yrep_mean222 <- mean((yrep_mean111 - kfp3$y)^2)
+yrep_mean333<- mean((yrep_mean111 - kfp3$yrep)^2)
+1-(yrep_mean222/yrep_mean333)
+
+
+print('RMSE then MEA then MSE for .9 horse')
+rmse(y = kfp4$y, yrep = kfp4$yrep)
+mea(y = kfp4$y, yrep = kfp4$yrep)
+mse(y = kfp4$y, yrep = kfp4$yrep)
+yrep_mean1111 <- colMeans( kfp4$yrep)
+yrep_mean2222 <- mean((yrep_mean1111 - kfp4$y)^2)
+yrep_mean3333<- mean((yrep_mean1111 - kfp4$yrep)^2)
+1-(yrep_mean2222/yrep_mean3333)
+
+coefs<-fixef(for_horseshoe)
+coefs2<-fixef(for_horseshoe2)
+coefs3<-fixef(for_horseshoe3)
+coefs4<-fixef(for_horseshoe4)
+
+write.table(coefs, file = "/data/lab/pumphrey/RScript/STATproj/partestprotein.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs2, file = "/data/lab/pumphrey/RScript/STATproj/partestprotein1.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs3, file = "/data/lab/pumphrey/RScript/STATproj/partestprotein3.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs4, file = "/data/lab/pumphrey/RScript/STATproj/partestprotein6.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+print('LM fitted for protein horse')
+ppe12 <- fitted(for_horseshoe)
+ppe12<-as.data.frame(ppe12)
+lm(ppe12$Estimate~table2.dfw$Protein)
+summary(lm(ppe12$Estimate~table2.dfw$Protein))
+       
+dat <- as.data.frame(cbind(Y = standata(for_horseshoe)$Y, ppe12))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/proteinhorseshoefitted.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+print('LM fitted par1')
+ppe <- fitted(for_horseshoe2)
+ppe<-as.data.frame(ppe)
+lm(ppe$Estimate~table2.dfw$Protein)
+summary(lm(ppe$Estimate~table2.dfw$Protein))
+
+
+
+
+print('LM fitted for for par3')
+ppe2 <- fitted(for_horseshoe3)
+ppe2<-as.data.frame(ppe2)
+lm(ppe2$Estimate~table2.dfw$Protein)
+summary(lm(ppe2$Estimate~table2.dfw$Protein))
+
+print('LM fitted for par6')
+ppe3 <- fitted(for_horseshoe4)
+ppe3<-as.data.frame(ppe3)
+lm(ppe3$Estimate~table2.dfw$Protein)
+summary(lm(ppe3$Estimate~table2.dfw$Protein))
+
+
+```
+
+
+This is example code for yield prediction with secondary trait information. There are additional lines of code for scaling and centering the dataset. More than the response trait (the secondary traits also used predictor) is also taken from the datafile that contains phenotype information. This is an example for using NDRE1 as a secondary trait in predicting yield.
+
+```{r eval=FALSE}
+print('yield scaled ndre testing')
+set.seed(7)
+library('dplyr', lib.loc='/data/lab/pumphrey/RPack/')
+library('brms', lib.loc='/data/lab/pumphrey/RPack/')
+library('sjPlot',lib.loc='/data/lab/pumphrey/RPack/')
+library('cmdstanr', lib.loc='/data/lab/pumphrey/RPack/')
+setwd("/data/lab/pumphrey/RFiles")
+MyY<-read.delim('SpillmanHardandSoftLaergeBlock.txt')
+MyG<-read.delim('reduced3.txt')
+yield <-MyY[c("Taxa","Yield","NDRE1")]
+names(yield)[1] <- 'taxa'
+table1.df <- dplyr::inner_join(yield, MyG, by= 'taxa')
+table2.dfw = subset(table1.df, select = -c(taxa) )
+
+table2.dfw<-na.omit(table2.dfw)
+
+table2.dfw <- as.data.frame(scale(table2.dfw))
+
+
+table2.dfw<-table2.dfw %>% select_if(~ !any(is.na(.)))
+
+
+
+
+options(future.globals.maxSize= +Inf)
+for_horseshoe <- brm(Yield ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10), prior = prior(lasso(df=1,scale=1)))
+for_horseshoe2 <- brm(Yield ~ .,data = table2.dfw,iter=10000,chains =2, backend = "cmdstanr",threads=threading(10), prior = prior(horseshoe(1)))
+
+
+kf<-kfold(for_horseshoe, K=5, save_fits=TRUE, chains=2)
+kf2<-kfold(for_horseshoe2, K=5, save_fits=TRUE, chains=2)
+
+rmse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  sqrt(mean((yrep_mean - y)^2))
+}
+
+mea <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean(abs(yrep_mean - y)))
+}
+
+mse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean((yrep_mean - y)^2))
+}
+
+kfp <- kfold_predict(kf)
+kfp2 <- kfold_predict(kf2)
+
+print('RMSE then MEA then MSE for lasso')
+rmse(y = kfp$y, yrep = kfp$yrep)
+mea(y = kfp$y, yrep = kfp$yrep)
+mse(y = kfp$y, yrep = kfp$yrep)
+yrep_mean1 <- colMeans( kfp$yrep)
+yrep_mean2 <- mean((yrep_mean1 - kfp$y)^2)
+yrep_mean3 <- mean((yrep_mean1 - kfp$yrep)^2)
+1-(yrep_mean2/yrep_mean3)
+
+
+
+print('RMSE then MEA then MSE for horse')
+rmse(y = kfp2$y, yrep = kfp2$yrep)
+mea(y = kfp2$y, yrep = kfp2$yrep)
+mse(y = kfp2$y, yrep = kfp2$yrep)
+yrep_mean11 <- colMeans( kfp2$yrep)
+yrep_mean22 <- mean((yrep_mean11 - kfp2$y)^2)
+yrep_mean33 <- mean((yrep_mean11 - kfp2$yrep)^2)
+1-(yrep_mean22/yrep_mean33)
+
+
+
+coefs<-fixef(for_horseshoe)
+coefs2<-fixef(for_horseshoe2)
+
+
+write.table(coefs, file = "/data/lab/pumphrey/RScript/STATproj/yieldscaledndrelasso.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+
+write.table(coefs2, file = "/data/lab/pumphrey/RScript/STATproj/yieldscaledndrehorse.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+
+
+print('LM fitted forlasso 1 ndvi')
+ppe12 <- fitted(for_horseshoe)
+ppe12<-as.data.frame(ppe12)
+lm(ppe12$Estimate~table2.dfw$Yield)
+summary(lm(ppe12$Estimate~table2.dfw$Yield))
+       
+
+
+print('LM fitted for horse ndvi')
+ppe <- fitted(for_horseshoe2)
+ppe<-as.data.frame(ppe)
+lm(ppe$Estimate~table2.dfw$Yield)
+summary(lm(ppe$Estimate~table2.dfw$Yield))
+
+
+       
+dat <- as.data.frame(cbind(Y = standata(for_horseshoe)$Y, ppe12))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/yieldscaledndrelassoresult.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+dat <- as.data.frame(cbind(Y = standata(for_horseshoe2)$Y, ppe))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/yieldscaledndrehorseresult.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+
+```
+
+This is example code for modfying slab size for prediction of yield. 
+
+```{r eval=FALSE}
+print('yield horse slab test')
+set.seed(7)
+library('dplyr', lib.loc='/data/lab/pumphrey/RPack/')
+library('brms', lib.loc='/data/lab/pumphrey/RPack/')
+library('sjPlot',lib.loc='/data/lab/pumphrey/RPack/')
+library('cmdstanr', lib.loc='/data/lab/pumphrey/RPack/')
+setwd("/data/lab/pumphrey/RFiles")
+MyY<-read.delim('SpillmanHardandSoftLaergeBlock.txt')
+MyG<-read.delim('reduced3.txt')
+yield <-MyY[c("Taxa","Yield")]
+names(yield)[1] <- 'taxa'
+table1.df <- dplyr::inner_join(yield, MyG, by= 'taxa')
+table2.dfw = subset(table1.df, select = -c(taxa) )
+options(future.globals.maxSize= +Inf)
+for_horseshoe <- brm(Yield ~.,data = table2.dfw,iter=10000,chains = 2, prior = prior(horseshoe(1,scale_slab=10000)),backend = "cmdstanr", threads=threading(10))
+for_horseshoe2 <- brm(Yield ~.,data = table2.dfw,iter=10000,chains = 2, prior = prior(horseshoe(1,scale_slab=2)),backend = "cmdstanr", threads=threading(10))
+for_horseshoe3 <- brm(Yield ~.,data = table2.dfw,iter=10000,chains = 2, prior = prior(horseshoe(1,scale_slab=100)),backend = "cmdstanr", threads=threading(10))
+for_horseshoe4 <- brm(Yield ~.,data = table2.dfw,iter=10000,chains = 2, prior = prior(horseshoe(1,scale_slab=1000)),backend = "cmdstanr", threads=threading(10))
+
+kf<-kfold(for_horseshoe, K=5, save_fits=TRUE, chains=2)
+kf2<-kfold(for_horseshoe2, K=5, save_fits=TRUE, chains=2)
+kf3<-kfold(for_horseshoe3, K=5, save_fits=TRUE, chains=2)
+kf4<-kfold(for_horseshoe4, K=5, save_fits=TRUE, chains=2)
+rmse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  sqrt(mean((yrep_mean - y)^2))
+}
+
+mea <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean(abs(yrep_mean - y)))
+}
+
+mse <- function(y, yrep) {
+  yrep_mean <- colMeans(yrep)
+  (mean((yrep_mean - y)^2))
+}
+
+kfp <- kfold_predict(kf)
+kfp2 <- kfold_predict(kf2)
+kfp3 <- kfold_predict(kf3)
+kfp4 <- kfold_predict(kf4)
+print('RMSE then MEA then MSE for largest slab')
+rmse(y = kfp$y, yrep = kfp$yrep)
+mea(y = kfp$y, yrep = kfp$yrep)
+mse(y = kfp$y, yrep = kfp$yrep)
+yrep_mean1 <- colMeans( kfp$yrep)
+yrep_mean2 <- mean((yrep_mean1 - kfp$y)^2)
+yrep_mean3 <- mean((yrep_mean1 - kfp$yrep)^2)
+1-(yrep_mean2/yrep_mean3)
+
+
+
+print('RMSE then MEA then MSE for default slab')
+rmse(y = kfp2$y, yrep = kfp2$yrep)
+mea(y = kfp2$y, yrep = kfp2$yrep)
+mse(y = kfp2$y, yrep = kfp2$yrep)
+yrep_mean11 <- colMeans( kfp2$yrep)
+yrep_mean22 <- mean((yrep_mean11 - kfp2$y)^2)
+yrep_mean33 <- mean((yrep_mean11 - kfp2$yrep)^2)
+1-(yrep_mean22/yrep_mean33)
+
+print('RMSE then MEA then MSE for 10 slab')
+rmse(y = kfp3$y, yrep = kfp3$yrep)
+mea(y = kfp3$y, yrep = kfp3$yrep)
+mse(y = kfp3$y, yrep = kfp3$yrep)
+yrep_mean111 <- colMeans( kfp3$yrep)
+yrep_mean222 <- mean((yrep_mean111 - kfp3$y)^2)
+yrep_mean333<- mean((yrep_mean111 - kfp3$yrep)^2)
+1-(yrep_mean222/yrep_mean333)
+
+
+print('RMSE then MEA then MSE for 100 slab')
+rmse(y = kfp4$y, yrep = kfp4$yrep)
+mea(y = kfp4$y, yrep = kfp4$yrep)
+mse(y = kfp4$y, yrep = kfp4$yrep)
+yrep_mean1111 <- colMeans( kfp4$yrep)
+yrep_mean2222 <- mean((yrep_mean1111 - kfp4$y)^2)
+yrep_mean3333<- mean((yrep_mean1111 - kfp4$yrep)^2)
+1-(yrep_mean2222/yrep_mean3333)
+
+coefs<-fixef(for_horseshoe)
+coefs2<-fixef(for_horseshoe2)
+coefs3<-fixef(for_horseshoe3)
+coefs4<-fixef(for_horseshoe4)
+
+write.table(coefs, file = "/data/lab/pumphrey/RScript/STATproj/hoseyieldslabtest10000.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+
+write.table(coefs2, file = "/data/lab/pumphrey/RScript/STATproj/horseyieldslabtest2.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs3, file = "/data/lab/pumphrey/RScript/STATproj/horseyieldslabtest10.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+write.table(coefs4, file = "/data/lab/pumphrey/RScript/STATproj/horseyieldslabtest100.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+print('LM fitted for horse 10000 slab')
+ppe12 <- fitted(for_horseshoe)
+ppe12<-as.data.frame(ppe12)
+lm(ppe12$Estimate~table2.dfw$Yield)
+summary(lm(ppe12$Estimate~table2.dfw$Yield))
+       
+
+
+print('LM fitted for horse  2  slab')
+ppe <- fitted(for_horseshoe2)
+ppe<-as.data.frame(ppe)
+lm(ppe$Estimate~table2.dfw$Yield)
+summary(lm(ppe$Estimate~table2.dfw$Yield))
+
+print('LM fitted for horse 10 slab')
+ppe2 <- fitted(for_horseshoe3)
+ppe2<-as.data.frame(ppe2)
+lm(ppe2$Estimate~table2.dfw$Yield)
+summary(lm(ppe2$Estimate~table2.dfw$Yield))
+
+print('LM fitted for horse 100 slab')
+ppe3 <- fitted(for_horseshoe4)
+ppe3<-as.data.frame(ppe3)
+lm(ppe3$Estimate~table2.dfw$Yield)
+summary(lm(ppe3$Estimate~table2.dfw$Yield))
+
+dat <- as.data.frame(cbind(Y = standata(for_horseshoe)$Y, ppe12))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/resultshugeslabyield.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+
+dat <- as.data.frame(cbind(Y = standata(for_horseshoe2)$Y, ppe))
+write.table(dat, file = "/data/lab/pumphrey/RScript/STATproj/resultnormalslabyield.txt", sep = "\t",
+            row.names = TRUE, col.names = NA)
+```
+
+This is just code for creating figures that are in the report, tables were mostly created manually with a text editor and CSV files.
+
+```{r eval=FALSE}
+height <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/heightmarker.csv")
+maturity <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/maturitymarker.csv")
+yield <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/yieldeffect.csv")
+tw <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/tweffect.csv")
+protein <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/proteineffect.csv")
+posterior <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/posteriorgraph.csv")
+posterior2 <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/posteriorgraph2.csv")
+posterior3 <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/posteriorgraph3.csv")
+summary <- read.delim("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/GenomicSelection/2021/SpillmanHardandSoftLaergeBlock.txt")
+slab <- read.csv("C:/Users/schmu/OneDrive - Washington State University (email.wsu.edu)/STAT576finalproject/markereffect/yieldslabcompare.csv")
+colnames(posterior)[1] = "Predictor"
+colnames(posterior2)[1] = "Predictor"
+colnames(posterior3)[1] = "Predictor"
+posterior3 <- na.omit(posterior3)
+colnames(slab)[1] = "Marker"
+colnames(yield)[1] = "Marker"
+colnames(tw)[1] = "Marker"
+colnames(yield)[3] = "HorseshoeYield"
+colnames(tw)[3] = "HorseshoeTestWeight"
+compare <- cbind(tw,yield)
+compare <- compare[ -c(2,4,5) ]
+
+library(ggplot2)
+library('ggpmisc')
+ggplot(height, aes(x=Horseshoe, y=Lasso)) +
+  geom_point(size=1, shape=23) +scale_x_continuous(limits = symmetric_limits) +
+  scale_y_continuous(limits = symmetric_limits) + theme(plot.title = element_text(size=22))+
+
+  labs(title="Height Marker Effects")
+
+ggplot(maturity, aes(x=Horseshoe, y=Lasso))+
+  geom_point(size=1, shape=23) +scale_x_continuous(limits = symmetric_limits) +
+  scale_y_continuous(limits = symmetric_limits) + theme(plot.title = element_text(size=22))+
+  labs(title="Maturity Marker Effects")
+
+ggplot(yield, aes(x=Horseshoe, y=Lasso)) +
+  geom_point(size=1, shape=23) +scale_x_continuous(limits = symmetric_limits) +
+  scale_y_continuous(limits = symmetric_limits) + theme(plot.title = element_text(size=22))+
+  labs(title="Yield Marker Effects")
+
+ggplot(tw, aes(x=Horseshoe, y=Lasso)) +
+  geom_point(size=1, shape=23) +scale_x_continuous(limits = symmetric_limits) +
+  scale_y_continuous(limits = symmetric_limits) + theme(plot.title = element_text(size=22))+
+  labs(title="Test Weight Marker Effects")
+
+ggplot(protein, aes(x=Horseshoe, y=Lasso)) +
+  geom_point(size=1, shape=23) +scale_x_continuous(limits = symmetric_limits) +
+  scale_y_continuous(limits = symmetric_limits) + theme(plot.title = element_text(size=22))+
+  labs(title="Protein Marker Effects")
+
+ggplot(posterior) +
+  theme_classic() +
+  aes(x = Predictor, y = Estimate, ymin = Q2.5, ymax = Q97.5) +
+  geom_pointrange() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(title="Top Ten Predictors with Four Secondary Traits")+
+  coord_flip()
+
+ggplot(posterior2) +
+  theme_classic() +
+  aes(x = Predictor, y = Estimate, ymin = Q2.5, ymax = Q97.5) +
+  geom_pointrange() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(title="Top Ten Predictors with NWI1 as a Secondary Trait")+
+  coord_flip()
+
+ggplot(posterior3) +
+  theme_classic() +
+  aes(x = Predictor, y = Estimate, ymin = Q2.5, ymax = Q97.5) +
+  geom_pointrange() +
+  geom_hline(yintercept = 0, linetype = 2) +
+  labs(title="Top Ten Predictors with NDRE1 as a Secondary Trait")+
+  coord_flip()
+
+
+ggplot(compare, aes(x=HorseshoeTestWeight, y=HorseshoeYield)) + geom_point()+
+  labs(title="Comparison of Marker Effects between Test Weight and Yield")
+summary2<-na.omit(summary)
+mean(summary2$NWI2)
+sd(summary2$NWI2)
+summary<-subset(summary, Yield >0)
+p <- ggplot(summary, aes(x=Yield)) + 
+  geom_histogram()
+p
+
+summary(lm(summary2$NWI2~summary2$Yield))
+
+
+pd <- position_dodge(width=0.2)
+
+
+ggplot(slab, aes(Marker,Estimate, color=Slab)) +
+  geom_point(aes(shape=Slab),size=4, position=pd) +
+  scale_color_manual(name="Slab",values=c("coral","steelblue")) +
+  scale_shape_manual(name="Slab",values=c(17,19)) +
+  theme_bw() +
+  scale_y_continuous("Marker Effect with 95% Interval") +geom_hline(yintercept = 0, linetype = 2) +
+  coord_flip()+
+  geom_errorbar(aes(ymin=Q2.5,ymax=Q97.5),width=0.1, position=pd)
+
+```
+
